@@ -1,0 +1,38 @@
+# Terraform Variables Configuration Example
+# Copy this file to terraform.tfvars and customize for your environment
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# EKS Cluster Configuration
+eks_cluster_name = "end-to-end-pipeline"
+
+# Instance Configuration
+instance_type = "t3.medium"
+
+# Database Configuration
+db_username = "admin"
+db_password = "CHANGE_ME_TO_SECURE_PASSWORD"
+
+# Notification Configuration
+# Get your Slack webhook from: https://api.slack.com/messaging/webhooks
+slack_webhook_url = ""
+
+# Deployment Strategy Configuration
+enable_blue_green = true
+enable_canary     = true
+
+# Canary Deployment Settings
+canary_initial_weight = 10  # Start with 10% traffic to canary
+
+# Monitoring Configuration
+enable_monitoring = true
+
+# Additional Configuration (optional)
+# Uncomment and customize as needed
+
+# tags = {
+#   Environment = "production"
+#   Project     = "data-pipeline"
+#   ManagedBy   = "terraform"
+# }

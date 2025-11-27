@@ -1,0 +1,108 @@
+# Argo Rollouts Installation via Helm values
+# Install using: kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+# Or using Helm (recommended for production)
+
+---
+# Argo Rollouts ConfigMap for Prometheus Metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-rollouts-config
+  namespace: argo-rollouts
+data:
+  # Enable Prometheus metrics
+  metricsPort: "8090"
+
+  # Traffic router plugins configuration
+  trafficRouterPlugins: |
+    - name: "argoproj-labs/gatewayAPI"
+      location: "https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi/releases/download/v0.1.0/gateway-api-plugin-linux-amd64"
+
+---
+# ServiceAccount for Argo Rollouts with extended permissions
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-rollouts
+  namespace: argo-rollouts
+
+---
+# ClusterRole for Argo Rollouts
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-rollouts-aggregate
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - rollouts
+      - rollouts/status
+      - rollouts/finalizers
+      - experiments
+      - experiments/status
+      - analysisruns
+      - analysisruns/status
+      - analysistemplates
+      - clusteranalysistemplates
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+      - create
+      - delete
+
+---
+# Service for Argo Rollouts Dashboard
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-rollouts-dashboard
+  namespace: argo-rollouts
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 3100
+      targetPort: 3100
+      protocol: TCP
+      name: dashboard
+  selector:
+    app.kubernetes.io/name: argo-rollouts
+    app.kubernetes.io/component: dashboard
+
+---
+# Argo Rollouts Notification ConfigMap (for Slack, email, etc.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-rollouts-notification-configmap
+  namespace: argo-rollouts
+data:
+  service.slack: |
+    token: $slack-token
+
+  template.rollout-updated: |
+    message: |
+      Rollout {{.rollout.metadata.name}} has been updated.
+      Revision: {{.rollout.status.currentPodHash}}
+      Phase: {{.rollout.status.phase}}
+
+  template.rollout-aborted: |
+    message: |
+      ⚠️ Rollout {{.rollout.metadata.name}} has been ABORTED!
+      Reason: Analysis failed
+
+  template.rollout-completed: |
+    message: |
+      ✅ Rollout {{.rollout.metadata.name}} completed successfully!
+      New revision: {{.rollout.status.currentPodHash}}
+
+  trigger.on-rollout-completed: |
+    - when: rollout.status.phase == 'Healthy'
+      send: [rollout-completed]
+
+  trigger.on-rollout-aborted: |
+    - when: rollout.status.phase == 'Degraded'
+      send: [rollout-aborted]

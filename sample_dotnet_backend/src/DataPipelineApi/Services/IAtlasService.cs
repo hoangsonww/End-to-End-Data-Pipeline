@@ -1,7 +1,9 @@
-namespace DataPipelineApi.Services
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace DataPipelineApi.Services;
+
+public interface IAtlasService
 {
-    public interface IAtlasService
-    {
-        Task<string> RegisterLineageAsync(string payload);
-    }
+  Task<string> RegisterLineageAsync(string payload, CancellationToken cancellationToken);
 }

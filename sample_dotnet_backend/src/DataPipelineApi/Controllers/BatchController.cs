@@ -1,32 +1,56 @@
+using System;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using DataPipelineApi.Models;
 using DataPipelineApi.Services;
 using Microsoft.AspNetCore.Mvc;
-using System.IO;
-using System.Text.Json;
 
 namespace DataPipelineApi.Controllers;
+
 [ApiController]
 [Route("api/batch")]
 public class BatchController : ControllerBase
 {
   private readonly IDbService _db;
-  private readonly IStorageService _st;
+  private readonly IStorageService _storage;
   private readonly IGEValidationService _ge;
   private readonly IBatchService _airflow;
+  private readonly ILogger<BatchController> _logger;
 
-  public BatchController(IDbService db, IStorageService st, IGEValidationService ge, IBatchService airflow)
-  { _db=db; _st=st; _ge=ge; _airflow=airflow; }
+  public BatchController(IDbService db, IStorageService storage, IGEValidationService ge, IBatchService airflow, ILogger<BatchController> logger)
+  {
+    _db = db;
+    _storage = storage;
+    _ge = ge;
+    _airflow = airflow;
+    _logger = logger;
+  }
 
   [HttpPost("ingest")]
-  public async Task<BatchResponse> Ingest([FromBody] BatchRequest req)
+  public async Task<ActionResult<BatchResponse>> Ingest([FromBody] BatchRequest req, CancellationToken cancellationToken)
   {
-    var rows = await _db.QueryMySqlAsync($"SELECT * FROM {req.SourceTable}");
+    var rows = await _db.ReadMySqlTableAsync(req.SourceTable, req.Limit, cancellationToken);
     await using var ms = new MemoryStream();
-    await JsonSerializer.SerializeAsync(ms, rows);
+    await JsonSerializer.SerializeAsync(ms, rows, cancellationToken: cancellationToken);
     ms.Position = 0;
-    await _st.UploadRawAsync($"{req.SourceTable}/{DateTime.UtcNow:yyyyMMddHHmmss}.json", ms);
-    var report = await _ge.ValidateAsync("great_expectations/expectations");
-    var run = await _airflow.TriggerBatchAsync();
-    return new() { RunId = run, GEReport = report };
+
+    var prefix = string.IsNullOrWhiteSpace(req.DestinationPrefix) ? req.SourceTable : req.DestinationPrefix.Trim('/');
+    if (prefix.Contains("..", StringComparison.Ordinal))
+      return ValidationProblem("destinationPrefix cannot contain path traversal sequences");
+    var objectKey = $"{prefix}/{DateTime.UtcNow:yyyyMMddHHmmss}.json";
+    await _storage.UploadRawAsync(objectKey, ms, cancellationToken);
+
+    string? report = null;
+    if (req.RunGreatExpectations)
+      report = await _ge.ValidateAsync("great_expectations/expectations", cancellationToken);
+
+    string? run = null;
+    if (req.TriggerAirflow)
+      run = await _airflow.TriggerBatchAsync(cancellationToken);
+
+    _logger.LogInformation("Batch ingest completed for {Table} rows={RowCount} objectKey={ObjectKey} run={RunId}", req.SourceTable, rows.Count, objectKey, run);
+    return Ok(new BatchResponse { RunId = run, GEReport = report, ObjectKey = objectKey });
   }
 }

@@ -1,0 +1,353 @@
+---
+# ServiceMonitor for Airflow metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: airflow-metrics
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: pipeline
+      component: airflow
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /admin/metrics
+      scheme: http
+    - port: statsd
+      interval: 30s
+      path: /metrics
+      scheme: http
+
+---
+# ServiceMonitor for Kafka JMX metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-metrics
+  namespace: default
+  labels:
+    app: pipeline
+    component: kafka
+spec:
+  selector:
+    matchLabels:
+      app: pipeline
+      component: kafka
+  endpoints:
+    - port: jmx
+      interval: 30s
+      path: /metrics
+      scheme: http
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+
+---
+# ServiceMonitor for Spark metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spark-metrics
+  namespace: default
+  labels:
+    app: pipeline
+    component: spark
+spec:
+  selector:
+    matchLabels:
+      app: pipeline
+      component: spark
+  endpoints:
+    - port: spark-ui
+      interval: 30s
+      path: /metrics/prometheus
+      scheme: http
+    - port: metrics
+      interval: 30s
+      path: /metrics
+      scheme: http
+
+---
+# ServiceMonitor for MongoDB exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mongodb-metrics
+  namespace: default
+  labels:
+    app: pipeline
+    component: mongodb
+spec:
+  selector:
+    matchLabels:
+      app: pipeline
+      component: mongodb
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+
+---
+# ServiceMonitor for Prometheus itself
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: prometheus
+  namespace: default
+  labels:
+    app: monitoring
+    component: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: monitoring
+      component: prometheus
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics
+
+---
+# ServiceMonitor for Grafana
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: grafana
+  namespace: default
+  labels:
+    app: monitoring
+    component: grafana
+spec:
+  selector:
+    matchLabels:
+      app: monitoring
+      component: grafana
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics
+
+---
+# PodMonitor for all pipeline pods (alternative to ServiceMonitor)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: pipeline-pods
+  namespace: default
+  labels:
+    app: pipeline
+spec:
+  selector:
+    matchLabels:
+      app: pipeline
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+    - port: http
+      interval: 30s
+      path: /metrics
+
+---
+# PrometheusRule for Deployment Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: deployment-alerts
+  namespace: default
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: deployment.rules
+      interval: 30s
+      rules:
+        # High error rate alert
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service) /
+            sum(rate(http_requests_total[5m])) by (service) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: deployment
+          annotations:
+            summary: "High error rate detected for {{ $labels.service }}"
+            description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.service }}"
+
+        # High latency alert
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_milliseconds_bucket[5m])) by (le, service)
+            ) > 1000
+          for: 10m
+          labels:
+            severity: warning
+            component: deployment
+          annotations:
+            summary: "High latency detected for {{ $labels.service }}"
+            description: "P95 latency is {{ $value }}ms for service {{ $labels.service }}"
+
+        # Rollout degraded
+        - alert: RolloutDegraded
+          expr: |
+            argo_rollouts_phase{phase="Degraded"} == 1
+          for: 2m
+          labels:
+            severity: critical
+            component: deployment
+          annotations:
+            summary: "Rollout {{ $labels.name }} is degraded"
+            description: "Rollout {{ $labels.name }} in namespace {{ $labels.namespace }} is in Degraded state"
+
+        # Analysis run failed
+        - alert: AnalysisRunFailed
+          expr: |
+            argo_rollouts_analysis_run_phase{phase="Failed"} == 1
+          for: 1m
+          labels:
+            severity: critical
+            component: deployment
+          annotations:
+            summary: "Analysis run {{ $labels.name }} failed"
+            description: "Analysis run {{ $labels.name }} for rollout {{ $labels.rollout }} failed"
+
+        # Airflow task failure rate
+        - alert: AirflowHighTaskFailureRate
+          expr: |
+            sum(rate(airflow_task_failed_total[10m])) /
+            sum(rate(airflow_task_total[10m])) > 0.10
+          for: 5m
+          labels:
+            severity: warning
+            component: airflow
+          annotations:
+            summary: "High Airflow task failure rate"
+            description: "Task failure rate is {{ $value | humanizePercentage }}"
+
+        # Kafka consumer lag
+        - alert: KafkaHighConsumerLag
+          expr: |
+            kafka_consumer_lag > 1000
+          for: 5m
+          labels:
+            severity: warning
+            component: kafka
+          annotations:
+            summary: "High Kafka consumer lag"
+            description: "Consumer lag is {{ $value }} messages for topic {{ $labels.topic }}"
+
+        # Spark job failures
+        - alert: SparkJobFailures
+          expr: |
+            increase(spark_application_failed_jobs[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            component: spark
+          annotations:
+            summary: "Spark job failures detected"
+            description: "{{ $value }} Spark jobs failed in the last 5 minutes"
+
+        # Pod not ready
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_phase{phase!~"Running|Succeeded"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Pod {{ $labels.pod }} not ready"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is in {{ $labels.phase }} phase"
+
+        # High CPU usage during canary
+        - alert: CanaryHighCPU
+          expr: |
+            avg(rate(container_cpu_usage_seconds_total{pod=~".*-canary-.*"}[5m])) by (pod) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            component: deployment
+          annotations:
+            summary: "Canary pod {{ $labels.pod }} has high CPU usage"
+            description: "CPU usage is {{ $value }}% for canary pod {{ $labels.pod }}"
+
+        # High memory usage during canary
+        - alert: CanaryHighMemory
+          expr: |
+            avg(container_memory_working_set_bytes{pod=~".*-canary-.*"} /
+            container_spec_memory_limit_bytes{pod=~".*-canary-.*"}) by (pod) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            component: deployment
+          annotations:
+            summary: "Canary pod {{ $labels.pod }} has high memory usage"
+            description: "Memory usage is {{ $value }}% for canary pod {{ $labels.pod }}"
+
+---
+# PrometheusRule for Recording Rules (pre-aggregated metrics)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: deployment-recording-rules
+  namespace: default
+  labels:
+    prometheus: kube-prometheus
+    role: recording-rules
+spec:
+  groups:
+    - name: deployment.recording
+      interval: 30s
+      rules:
+        # Success rate by service
+        - record: service:http_requests:success_rate
+          expr: |
+            sum(rate(http_requests_total{status=~"2.."}[5m])) by (service) /
+            sum(rate(http_requests_total[5m])) by (service)
+
+        # Error rate by service
+        - record: service:http_requests:error_rate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service) /
+            sum(rate(http_requests_total[5m])) by (service)
+
+        # P95 latency by service
+        - record: service:http_request_duration:p95
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_milliseconds_bucket[5m])) by (le, service)
+            )
+
+        # P99 latency by service
+        - record: service:http_request_duration:p99
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_milliseconds_bucket[5m])) by (le, service)
+            )
+
+        # Request rate by service
+        - record: service:http_requests:rate
+          expr: |
+            sum(rate(http_requests_total[5m])) by (service)
+
+        # Rollout health status
+        - record: rollout:health:status
+          expr: |
+            argo_rollouts_phase{phase="Healthy"} == 1
+
+        # Canary weight
+        - record: rollout:canary:weight
+          expr: |
+            argo_rollouts_info_replicas_desired{rollout=~".*-canary.*"}

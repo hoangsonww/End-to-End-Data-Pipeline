@@ -1,0 +1,178 @@
+---
+# Airflow Web UI Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: pipeline
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  sessionAffinity: ClientIP
+
+---
+# Kafka Broker Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-broker
+  namespace: default
+  labels:
+    app: pipeline
+    component: kafka
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+    - name: jmx
+      port: 9999
+      targetPort: 9999
+      protocol: TCP
+
+---
+# Spark Master Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-master
+  namespace: default
+  labels:
+    app: pipeline
+    component: spark
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+  ports:
+    - name: spark-ui
+      port: 4040
+      targetPort: 4040
+      protocol: TCP
+    - name: spark-master
+      port: 7077
+      targetPort: 7077
+      protocol: TCP
+
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: default
+  labels:
+    app: pipeline
+    component: mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: 27017
+      protocol: TCP
+
+---
+# Hadoop NameNode Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-namenode
+  namespace: default
+  labels:
+    app: pipeline
+    component: hadoop
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+  ports:
+    - name: namenode-ui
+      port: 50070
+      targetPort: 50070
+      protocol: TCP
+    - name: namenode-rpc
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+
+---
+# InfluxDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: influxdb
+  namespace: default
+  labels:
+    app: pipeline
+    component: influxdb
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+  ports:
+    - name: http
+      port: 8086
+      targetPort: 8086
+      protocol: TCP
+
+---
+# Prometheus Service (for monitoring)
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: default
+  labels:
+    app: monitoring
+    component: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: monitoring
+    component: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+---
+# Grafana Service (for visualization)
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: default
+  labels:
+    app: monitoring
+    component: grafana
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: monitoring
+    component: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

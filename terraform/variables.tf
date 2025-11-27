@@ -21,3 +21,34 @@ variable "eks_cluster_name" {
   description = "EKS Cluster Name"
   default     = "end-to-end-pipeline"
 }
+
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for deployment notifications"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "enable_blue_green" {
+  description = "Enable blue/green deployment strategy"
+  type        = bool
+  default     = true
+}
+
+variable "enable_canary" {
+  description = "Enable canary deployment strategy"
+  type        = bool
+  default     = true
+}
+
+variable "canary_initial_weight" {
+  description = "Initial traffic weight for canary deployments (percentage)"
+  type        = number
+  default     = 10
+}
+
+variable "enable_monitoring" {
+  description = "Enable Prometheus and Grafana monitoring"
+  type        = bool
+  default     = true
+}

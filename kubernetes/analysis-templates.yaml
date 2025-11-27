@@ -1,0 +1,249 @@
+---
+# AnalysisTemplate for Success Rate Monitoring
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-analysis
+  namespace: default
+spec:
+  metrics:
+    - name: success-rate
+      interval: 30s
+      successCondition: result >= 0.95
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(rate(
+              http_requests_total{status=~"2.."}[5m]
+            )) /
+            sum(rate(
+              http_requests_total[5m]
+            ))
+
+    - name: error-rate
+      interval: 30s
+      successCondition: result <= 0.05
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(rate(
+              http_requests_total{status=~"5.."}[5m]
+            )) /
+            sum(rate(
+              http_requests_total[5m]
+            ))
+
+---
+# AnalysisTemplate for Latency Monitoring
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency-analysis
+  namespace: default
+spec:
+  metrics:
+    - name: p95-latency
+      interval: 30s
+      successCondition: result <= 500  # 500ms
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_milliseconds_bucket[5m])) by (le)
+            )
+
+    - name: p99-latency
+      interval: 30s
+      successCondition: result <= 1000  # 1000ms
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_milliseconds_bucket[5m])) by (le)
+            )
+
+---
+# AnalysisTemplate for Airflow-specific Metrics
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: airflow-health-analysis
+  namespace: default
+spec:
+  metrics:
+    - name: task-failure-rate
+      interval: 60s
+      successCondition: result <= 0.10  # Max 10% task failure rate
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(rate(airflow_task_failed_total[5m])) /
+            sum(rate(airflow_task_total[5m]))
+
+    - name: scheduler-heartbeat
+      interval: 30s
+      successCondition: result > 0
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            airflow_scheduler_heartbeat
+
+    - name: dag-processing-time
+      interval: 60s
+      successCondition: result <= 30  # Max 30 seconds
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            avg(airflow_dagbag_import_duration_seconds)
+
+---
+# AnalysisTemplate for Kafka Health
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: kafka-health-analysis
+  namespace: default
+spec:
+  metrics:
+    - name: consumer-lag
+      interval: 30s
+      successCondition: result <= 1000  # Max 1000 messages lag
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(kafka_consumer_lag)
+
+    - name: broker-availability
+      interval: 30s
+      successCondition: result == 1  # All brokers must be up
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            min(kafka_server_broker_state)
+
+    - name: under-replicated-partitions
+      interval: 60s
+      successCondition: result == 0
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(kafka_server_replicamanager_underreplicatedpartitions)
+
+---
+# AnalysisTemplate for Spark Job Health
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: spark-job-analysis
+  namespace: default
+spec:
+  metrics:
+    - name: failed-jobs
+      interval: 60s
+      successCondition: result == 0
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(increase(spark_application_failed_jobs[5m]))
+
+    - name: executor-availability
+      interval: 30s
+      successCondition: result >= 2  # At least 2 executors available
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            spark_executor_count
+
+---
+# Combined AnalysisTemplate for Full Health Check
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: complete-health-analysis
+  namespace: default
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 30s
+      count: 5
+      successCondition: result >= 0.95
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            sum(rate(
+              http_requests_total{service="{{args.service-name}}",status=~"2.."}[2m]
+            )) /
+            sum(rate(
+              http_requests_total{service="{{args.service-name}}"}[2m]
+            ))
+
+    - name: cpu-usage
+      interval: 30s
+      successCondition: result <= 80  # Max 80% CPU
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            avg(rate(container_cpu_usage_seconds_total{pod=~"{{args.service-name}}.*"}[2m])) * 100
+
+    - name: memory-usage
+      interval: 30s
+      successCondition: result <= 85  # Max 85% memory
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus:9090
+          query: |
+            avg(container_memory_working_set_bytes{pod=~"{{args.service-name}}.*"} /
+            container_spec_memory_limit_bytes{pod=~"{{args.service-name}}.*"}) * 100
+
+---
+# Web Analysis using HTTP checks
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: http-health-check
+  namespace: default
+spec:
+  args:
+    - name: url
+  metrics:
+    - name: http-check
+      count: 5
+      interval: 10s
+      successCondition: result == "200"
+      failureLimit: 2
+      provider:
+        web:
+          url: "{{args.url}}/health"
+          timeoutSeconds: 5
+          jsonPath: "{$.status}"

@@ -1,0 +1,143 @@
+---
+# AWS Load Balancer Ingress for Airflow
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pipeline-ingress
+  namespace: default
+  annotations:
+    # AWS Load Balancer Controller annotations
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+
+    # SSL/TLS Configuration (uncomment and configure with your ACM certificate ARN)
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:region:account-id:certificate/certificate-id
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+    # Security
+    alb.ingress.kubernetes.io/security-groups: pipeline-ingress-sg
+
+    # Traffic distribution settings
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true,idle_timeout.timeout_seconds=60
+
+    # Tags for AWS resources
+    alb.ingress.kubernetes.io/tags: Environment=production,Project=data-pipeline,ManagedBy=kubernetes
+
+spec:
+  rules:
+    - host: airflow.yourdomain.com  # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: airflow-webserver
+                port:
+                  number: 8080
+
+    - host: spark.yourdomain.com  # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spark-master
+                port:
+                  number: 4040
+
+    - host: grafana.yourdomain.com  # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+
+---
+# Nginx Ingress Controller alternative (for more advanced traffic management)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pipeline-nginx-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: nginx
+
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+
+    # Circuit breaker configuration
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+
+    # Canary deployment annotations (can be used with standard Nginx Ingress)
+    # nginx.ingress.kubernetes.io/canary: "true"
+    # nginx.ingress.kubernetes.io/canary-weight: "20"
+    # nginx.ingress.kubernetes.io/canary-by-header: "x-canary"
+
+    # Load balancing algorithm
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+
+    # Enable CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+
+    # SSL/TLS
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+spec:
+  tls:
+    - hosts:
+        - airflow.yourdomain.com
+        - spark.yourdomain.com
+        - grafana.yourdomain.com
+      secretName: pipeline-tls-secret
+
+  rules:
+    - host: airflow.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: airflow-webserver
+                port:
+                  number: 8080
+
+    - host: spark.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spark-master
+                port:
+                  number: 4040
+
+    - host: grafana.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
