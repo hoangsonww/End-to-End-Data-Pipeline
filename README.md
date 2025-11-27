@@ -63,87 +63,48 @@ Basically, data will be streamed with Kafka, processed with Spark, and stored in
 
 ### Text-Based Pipeline Diagram
 
-```
-                            ┌────────────────────────────────┐
-                            │         Batch Source           │
-                            │(MySQL, Files, User Interaction)│
-                            └────────────────┬───────────────┘
-                                             │
-                                             │  (Extract/Validate)
-                                             ▼
-                           ┌─────────────────────────────────────┐
-                           │      Airflow Batch DAG              │
-                           │ - Extracts data from MySQL          │
-                           │ - Validates with Great Expectations │
-                           │ - Uploads raw data to MinIO         │
-                           └─────────────────┬───────────────────┘
-                                             │ (spark-submit)
-                                             ▼
-                             ┌────────────────────────────────┐
-                             │         Spark Batch Job        │
-                             │ - Reads raw CSV from MinIO     │
-                             │ - Transforms, cleans, enriches │
-                             │ - Writes transformed data to   │
-                             │   PostgreSQL & MinIO           │
-                             └──────────────┬─────────────────┘
-                                            │ (Load/Analyze)
-                                            ▼
-                             ┌────────────────────────────────┐
-                             │       Processed Data Store     │
-                             │ (PostgreSQL, MongoDB, AWS S3)  │
-                             └───────────────┬────────────────┘
-                                             │ (Query/Analyze)
-                                             ▼
-                             ┌────────────────────────────────┐
-                             │         Cache & Indexing       │
-                             │     (Elasticsearch, Redis)     │
-                             └────────────────────────────────┘
-                                        
-Streaming Side:
-                              ┌─────────────────────────────┐
-                              │       Streaming Source      │
-                              │         (Kafka)             │
-                              └────────────┬────────────────┘
-                                           │
-                                           ▼
-                           ┌───────────────────────────────────┐
-                           │    Spark Streaming Job            │
-                           │ - Consumes Kafka messages         │
-                           │ - Filters and detects anomalies   │
-                           │ - Persists anomalies to           │
-                           │   PostgreSQL & MinIO              │
-                           └───────────────────────────────────┘
-
-Monitoring & Governance:
-                              ┌────────────────────────────────┐
-                              │       Monitoring &             │
-                              │  Data Governance Layer         │
-                              │ - Prometheus & Grafana         │
-                              │ - Apache Atlas / OpenMetadata  │
-                              └────────────────────────────────┘
-                                        
-ML & Serving:
-                              ┌──────────────────────────────┐
-                              │        AI/ML Serving         │
-                              │ - Feature Store (Feast)      │
-                              │ - MLflow Model Tracking      │
-                              │ - Model training & serving   │
-                              │ - BI Dashboards              │
-                              └──────────────────────────────┘
-                              
-CI/CD & Terraform:
-                              ┌──────────────────────────────┐
-                              │        CI/CD Pipelines       │
-                              │ - GitHub Actions / Jenkins   │
-                              │ - Terraform for Cloud Deploy │
-                              └──────────────────────────────┘
-
-Container Orchestration:
-                              ┌──────────────────────────────┐
-                              │       Kubernetes Cluster     │
-                              │ - Argo CD for GitOps         │
-                              │ - Helm Charts for Deployment │
-                              └──────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Batch["Batch Processing"]
+        BS[Batch Source<br/>MySQL, Files, User Interaction]
+        AD[Airflow Batch DAG<br/>- Extracts data from MySQL<br/>- Validates with Great Expectations<br/>- Uploads raw data to MinIO]
+        SB[Spark Batch Job<br/>- Reads raw CSV from MinIO<br/>- Transforms, cleans, enriches<br/>- Writes to PostgreSQL & MinIO]
+        PDS[Processed Data Store<br/>PostgreSQL, MongoDB, AWS S3]
+        CI[Cache & Indexing<br/>Elasticsearch, Redis]
+        
+        BS -->|Extract/Validate| AD
+        AD -->|spark-submit| SB
+        SB -->|Load/Analyze| PDS
+        PDS -->|Query/Analyze| CI
+    end
+    
+    subgraph Stream["Streaming Processing"]
+        SS[Streaming Source<br/>Kafka]
+        SSJ[Spark Streaming Job<br/>- Consumes Kafka messages<br/>- Filters and detects anomalies<br/>- Persists to PostgreSQL & MinIO]
+        
+        SS --> SSJ
+    end
+    
+    subgraph Monitor["Monitoring & Governance"]
+        MG[Monitoring & Data Governance<br/>- Prometheus & Grafana<br/>- Apache Atlas / OpenMetadata]
+    end
+    
+    subgraph ML["AI/ML Serving"]
+        MLS[AI/ML Serving<br/>- Feature Store Feast<br/>- MLflow Model Tracking<br/>- Model training & serving<br/>- BI Dashboards]
+    end
+    
+    subgraph CICD["CI/CD & Infrastructure"]
+        CIP[CI/CD Pipelines<br/>GitHub Actions / Jenkins<br/>Terraform for Cloud Deploy]
+        K8S[Kubernetes Cluster<br/>Argo CD for GitOps<br/>Helm Charts for Deployment]
+    end
+    
+    SSJ --> PDS
+    MG -.monitors.-> Batch
+    MG -.monitors.-> Stream
+    ML -.uses.-> PDS
+    CIP --> K8S
+    K8S -.orchestrates.-> Batch
+    K8S -.orchestrates.-> Stream
 ```
 
 ### Full Flow Diagram with Backend & Frontend Integration (Optional)

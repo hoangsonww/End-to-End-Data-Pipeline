@@ -1,0 +1,410 @@
+---
+# Canary Deployment for Airflow with Progressive Traffic Shifting
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: airflow-canary-rollout
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    strategy: canary
+spec:
+  replicas: 5
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: pipeline
+      component: airflow
+
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        component: airflow
+    spec:
+      containers:
+        - name: airflow-webserver
+          image: myrepo/airflow-pipeline:latest
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: "LocalExecutor"
+            - name: AIRFLOW__METRICS__STATSD_ON
+              value: "True"
+            - name: AIRFLOW__METRICS__STATSD_HOST
+              value: "prometheus-statsd-exporter"
+            - name: AIRFLOW__METRICS__STATSD_PORT
+              value: "9125"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+
+  strategy:
+    canary:
+      # Stable service receives baseline traffic
+      stableService: airflow-stable
+
+      # Canary service receives canary traffic
+      canaryService: airflow-canary
+
+      # Traffic routing (using Nginx Ingress, ALB, or Istio)
+      trafficRouting:
+        nginx:
+          stableIngress: pipeline-nginx-ingress
+          # Additional headers can be used for controlled testing
+          additionalIngressAnnotations:
+            canary-by-header: X-Canary
+            canary-by-header-value: "insider"
+
+      # Progressive traffic shift steps
+      steps:
+        # Step 1: Deploy canary with 10% traffic
+        - setWeight: 10
+        - pause:
+            duration: 2m
+
+        # Step 2: Run analysis at 10%
+        - analysis:
+            templates:
+              - templateName: success-rate-analysis
+              - templateName: latency-analysis
+            args:
+              - name: service-name
+                value: airflow-canary
+
+        # Step 3: Increase to 25% if analysis passes
+        - setWeight: 25
+        - pause:
+            duration: 3m
+
+        # Step 4: Run analysis at 25%
+        - analysis:
+            templates:
+              - templateName: complete-health-analysis
+              - templateName: airflow-health-analysis
+            args:
+              - name: service-name
+                value: airflow-canary
+
+        # Step 5: Increase to 50%
+        - setWeight: 50
+        - pause:
+            duration: 5m
+
+        # Step 6: Run comprehensive analysis at 50%
+        - analysis:
+            templates:
+              - templateName: success-rate-analysis
+              - templateName: latency-analysis
+              - templateName: airflow-health-analysis
+            args:
+              - name: service-name
+                value: airflow-canary
+
+        # Step 7: Increase to 75%
+        - setWeight: 75
+        - pause:
+            duration: 3m
+
+        # Step 8: Final analysis before full promotion
+        - analysis:
+            templates:
+              - templateName: complete-health-analysis
+            args:
+              - name: service-name
+                value: airflow-canary
+
+        # Step 9: Full promotion to 100%
+        - setWeight: 100
+
+      # Analysis configuration
+      analysis:
+        # Run background analysis throughout the rollout
+        templates:
+          - templateName: success-rate-analysis
+          - templateName: error-rate
+        args:
+          - name: service-name
+            value: airflow-canary
+        startingStep: 1  # Start analysis from step 1
+
+      # Anti-affinity to spread pods across nodes
+      antiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - pipeline
+
+---
+# Stable Service (receives production traffic)
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-stable
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    role: stable
+spec:
+  type: LoadBalancer
+  selector:
+    app: pipeline
+    component: airflow
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# Canary Service (receives canary traffic)
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-canary
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    role: canary
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+    component: airflow
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# Advanced Canary with Experiment (A/B Testing)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: spark-canary-experiment
+  namespace: default
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: pipeline
+      component: spark
+
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        component: spark
+    spec:
+      containers:
+        - name: spark-master
+          image: myrepo/spark-pipeline:latest
+          ports:
+            - containerPort: 4040
+            - containerPort: 7077
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+
+  strategy:
+    canary:
+      stableService: spark-stable
+      canaryService: spark-canary
+
+      # Advanced: Use experiments for A/B testing
+      experiments:
+        - name: spark-performance-test
+          templates:
+            - name: baseline
+              specRef: stable
+              replicas: 2
+            - name: optimized
+              specRef: canary
+              replicas: 2
+          analyses:
+            - name: performance-comparison
+              templateName: spark-job-analysis
+          duration: 10m
+
+      steps:
+        - setWeight: 20
+        - pause: {duration: 5m}
+        - experiment:
+            templates:
+              - name: spark-perf-experiment
+                specRef: canary
+            analyses:
+              - name: spark-analysis
+                templateName: spark-job-analysis
+        - setWeight: 50
+        - pause: {duration: 10m}
+        - setWeight: 100
+
+---
+# Canary with Manual Gates and Notifications
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: kafka-canary-manual
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pipeline
+      component: kafka
+
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        component: kafka
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9999"
+    spec:
+      containers:
+        - name: kafka
+          image: myrepo/kafka-pipeline:latest
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: jmx
+              containerPort: 9999
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+
+  strategy:
+    canary:
+      stableService: kafka-stable
+      canaryService: kafka-canary
+
+      # Manual approval gates
+      steps:
+        - setWeight: 10
+        - pause: {duration: 5m}
+
+        # Manual gate for approval
+        - pause: {}  # Indefinite pause - requires manual promotion
+
+        - setWeight: 25
+        - analysis:
+            templates:
+              - templateName: kafka-health-analysis
+
+        - pause: {}  # Another manual gate
+
+        - setWeight: 50
+        - pause: {duration: 10m}
+
+        - pause: {}  # Final approval before full rollout
+
+        - setWeight: 100
+
+      # Max duration before auto-rollback
+      maxSurge: 1
+      maxUnavailable: 0
+
+      # Abort conditions (automatic rollback triggers)
+      abortScaleDownDelaySeconds: 30
+
+---
+# Traffic Split Canary (Header-based routing)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api-header-canary
+  namespace: default
+  annotations:
+    notifications.argoproj.io/subscribe.on-rollout-completed.slack: "deployments-channel"
+    notifications.argoproj.io/subscribe.on-rollout-aborted.slack: "alerts-channel"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api
+      tier: backend
+
+  template:
+    metadata:
+      labels:
+        app: api
+        tier: backend
+    spec:
+      containers:
+        - name: backend
+          image: myrepo/backend:latest
+          ports:
+            - containerPort: 8080
+
+  strategy:
+    canary:
+      canaryService: api-canary
+      stableService: api-stable
+
+      trafficRouting:
+        managedRoutes:
+          - name: header-route
+        nginx:
+          stableIngress: api-ingress
+          additionalIngressAnnotations:
+            # Route users with X-Version: canary header to canary
+            canary-by-header: X-Version
+            canary-by-header-value: canary
+
+      steps:
+        # Phase 1: Internal testing only (header-based)
+        - setHeaderRoute:
+            name: header-route
+            match:
+              - headerName: X-Version
+                headerValue:
+                  exact: canary
+        - pause: {duration: 10m}
+
+        # Phase 2: 5% of general traffic
+        - setWeight: 5
+        - pause: {duration: 5m}
+
+        # Phase 3: Progressive rollout
+        - setWeight: 20
+        - pause: {duration: 5m}
+        - setWeight: 40
+        - pause: {duration: 5m}
+        - setWeight: 60
+        - pause: {duration: 5m}
+        - setWeight: 80
+        - pause: {duration: 3m}
+        - setWeight: 100

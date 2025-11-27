@@ -1,0 +1,288 @@
+{
+  "dashboard": {
+    "title": "Advanced Deployment Monitoring",
+    "tags": ["deployment", "rollouts", "canary", "blue-green"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Rollout Status Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "count(argo_rollouts_phase{phase=\"Healthy\"})",
+            "legendFormat": "Healthy Rollouts",
+            "refId": "A"
+          },
+          {
+            "expr": "count(argo_rollouts_phase{phase=\"Progressing\"})",
+            "legendFormat": "Progressing Rollouts",
+            "refId": "B"
+          },
+          {
+            "expr": "count(argo_rollouts_phase{phase=\"Degraded\"})",
+            "legendFormat": "Degraded Rollouts",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Canary Traffic Weight",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "argo_rollouts_info_replicas_desired{rollout=~\".*-canary.*\"} / argo_rollouts_info_replicas_desired * 100",
+            "legendFormat": "{{ rollout }}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 75, "color": "orange"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Success Rate Comparison (Stable vs Canary)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{service=~\".*-stable\",status=~\"2..\"}[5m])) / sum(rate(http_requests_total{service=~\".*-stable\"}[5m]))",
+            "legendFormat": "Stable - Success Rate",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{service=~\".*-canary\",status=~\"2..\"}[5m])) / sum(rate(http_requests_total{service=~\".*-canary\"}[5m]))",
+            "legendFormat": "Canary - Success Rate",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Latency Comparison (P95)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_milliseconds_bucket{service=~\".*-stable\"}[5m])) by (le))",
+            "legendFormat": "Stable - P95 Latency",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_milliseconds_bucket{service=~\".*-canary\"}[5m])) by (le))",
+            "legendFormat": "Canary - P95 Latency",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Error Rate Comparison",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{service=~\".*-stable\",status=~\"5..\"}[5m])) / sum(rate(http_requests_total{service=~\".*-stable\"}[5m]))",
+            "legendFormat": "Stable - Error Rate",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{service=~\".*-canary\",status=~\"5..\"}[5m])) / sum(rate(http_requests_total{service=~\".*-canary\"}[5m]))",
+            "legendFormat": "Canary - Error Rate",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Analysis Run Status",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "argo_rollouts_analysis_run_phase",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "name": "Analysis Run",
+                "namespace": "Namespace",
+                "phase": "Phase",
+                "rollout": "Rollout"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "CPU Usage (Stable vs Canary)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "avg(rate(container_cpu_usage_seconds_total{pod=~\".*-stable-.*\"}[5m])) by (pod) * 100",
+            "legendFormat": "Stable - {{ pod }}",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(rate(container_cpu_usage_seconds_total{pod=~\".*-canary-.*\"}[5m])) by (pod) * 100",
+            "legendFormat": "Canary - {{ pod }}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Memory Usage (Stable vs Canary)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "avg(container_memory_working_set_bytes{pod=~\".*-stable-.*\"} / container_spec_memory_limit_bytes{pod=~\".*-stable-.*\"}) by (pod) * 100",
+            "legendFormat": "Stable - {{ pod }}",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(container_memory_working_set_bytes{pod=~\".*-canary-.*\"} / container_spec_memory_limit_bytes{pod=~\".*-canary-.*\"}) by (pod) * 100",
+            "legendFormat": "Canary - {{ pod }}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Deployment Timeline",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "changes(argo_rollouts_info_replicas_updated[30m])",
+            "legendFormat": "{{ rollout }} - Deployment Events",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Airflow Task Success Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 34},
+        "targets": [
+          {
+            "expr": "sum(rate(airflow_task_total[5m])) - sum(rate(airflow_task_failed_total[5m])) / sum(rate(airflow_task_total[5m]))",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Kafka Consumer Lag",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 34},
+        "targets": [
+          {
+            "expr": "sum(kafka_consumer_lag) by (topic)",
+            "legendFormat": "{{ topic }}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Spark Job Status",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 34},
+        "targets": [
+          {
+            "expr": "sum(increase(spark_application_completed_jobs[5m]))",
+            "legendFormat": "Completed Jobs",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(increase(spark_application_failed_jobs[5m]))",
+            "legendFormat": "Failed Jobs",
+            "refId": "B"
+          }
+        ]
+      }
+    ]
+  }
+}

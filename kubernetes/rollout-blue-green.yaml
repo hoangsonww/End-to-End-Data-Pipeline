@@ -1,0 +1,251 @@
+---
+# Blue/Green Deployment for Airflow using Argo Rollouts
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: airflow-rollout
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: pipeline
+      component: airflow
+
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        component: airflow
+    spec:
+      containers:
+        - name: airflow-webserver
+          image: myrepo/airflow-pipeline:latest
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: "LocalExecutor"
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://airflow:airflow@postgres/airflow"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+
+  strategy:
+    blueGreen:
+      # Service that the rollout modifies as the active service
+      activeService: airflow-webserver-active
+
+      # Service that the rollout modifies as the preview service (for testing before promotion)
+      previewService: airflow-webserver-preview
+
+      # Auto promotion after 5 minutes if no manual intervention
+      autoPromotionEnabled: false
+      autoPromotionSeconds: 300
+
+      # Pre-promotion analysis
+      prePromotionAnalysis:
+        templates:
+          - templateName: success-rate-analysis
+          - templateName: latency-analysis
+          - templateName: airflow-health-analysis
+        args:
+          - name: service-name
+            value: airflow-webserver
+
+      # Post-promotion analysis (runs after promotion)
+      postPromotionAnalysis:
+        templates:
+          - templateName: complete-health-analysis
+        args:
+          - name: service-name
+            value: airflow-webserver
+
+      # Scale down old replica set after successful deployment
+      scaleDownDelaySeconds: 300
+      scaleDownDelayRevisionLimit: 2
+
+      # Anti-affinity for blue/green pods
+      antiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution: {}
+
+---
+# Active Service (receives production traffic)
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver-active
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    role: active
+spec:
+  type: LoadBalancer
+  selector:
+    app: pipeline
+    component: airflow
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+---
+# Preview Service (for testing new version before promotion)
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver-preview
+  namespace: default
+  labels:
+    app: pipeline
+    component: airflow
+    role: preview
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+    component: airflow
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+---
+# Blue/Green Deployment for Kafka (stateful workload example)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: kafka-rollout
+  namespace: default
+  labels:
+    app: pipeline
+    component: kafka
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: pipeline
+      component: kafka
+
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        component: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: myrepo/kafka-pipeline:latest
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: jmx
+              containerPort: 9999
+          env:
+            - name: KAFKA_BROKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "zookeeper:2181"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+
+  strategy:
+    blueGreen:
+      activeService: kafka-broker-active
+      previewService: kafka-broker-preview
+      autoPromotionEnabled: false
+      autoPromotionSeconds: 600  # 10 minutes for Kafka
+
+      prePromotionAnalysis:
+        templates:
+          - templateName: kafka-health-analysis
+        args:
+          - name: service-name
+            value: kafka-broker
+
+      scaleDownDelaySeconds: 600  # Keep old version longer for Kafka
+      scaleDownDelayRevisionLimit: 1
+
+---
+# Kafka Active Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-broker-active
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+    component: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+
+---
+# Kafka Preview Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-broker-preview
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline
+    component: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
