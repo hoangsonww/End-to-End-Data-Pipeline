@@ -541,6 +541,7 @@ Congratulations! You have successfully set up the end-to-end data pipeline with 
 ## Example Applications
 
 ```mermaid
+%%{init: {"theme": "default", "themeVariables": { "primaryColor": "#f9f9f9", "fontSize": "14px", "lineColor": "#000000", "textColor": "#000000", "background": "#ffffff"}}}%%
 mindmap
   root((Data Pipeline<br/>Use Cases))
     E-Commerce
