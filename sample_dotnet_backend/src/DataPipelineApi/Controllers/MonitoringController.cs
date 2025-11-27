@@ -1,5 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Threading;
+using System.Threading.Tasks;
 using DataPipelineApi.Services;
+using Microsoft.AspNetCore.Mvc;
 
 namespace DataPipelineApi.Controllers;
 [ApiController]
@@ -10,6 +12,6 @@ public class MonitoringController : ControllerBase
   public MonitoringController(IMonitoringService mon) => _mon = mon;
 
   [HttpGet("health")]
-  public async Task<IActionResult> Health()
-    => Ok(new { status = await _mon.GetHealthAsync() });
+  public async Task<IActionResult> Health(CancellationToken cancellationToken)
+    => Ok(await _mon.GetHealthAsync(cancellationToken));
 }

@@ -3,6 +3,7 @@ WORKDIR /src
 COPY ["src/DataPipelineApi/DataPipelineApi.csproj","DataPipelineApi/"]
 RUN dotnet restore "DataPipelineApi/DataPipelineApi.csproj"
 COPY src/DataPipelineApi/. ./DataPipelineApi
+COPY appsettings.json DataPipelineApi/appsettings.json
 WORKDIR /src/DataPipelineApi
 RUN dotnet publish -c Release -o /app/publish
 
