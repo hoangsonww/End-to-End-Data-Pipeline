@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "End-to-End Data Pipeline"
+version: "1.0.0"
+date-released: "2025-05-25"
+type: software
+authors:
+  - family-names: "Nguyen"
+    given-names: "Son"
+    orcid: "https://orcid.org/0009-0002-7806-068X"
+repository-code: "https://github.com/hoangsonww/End-to-End-Data-Pipeline"
+url: "https://github.com/hoangsonww/End-to-End-Data-Pipeline"
+license: "MIT"
+keywords:
+  - Data Science
+  - Data
+  - Data Analytics

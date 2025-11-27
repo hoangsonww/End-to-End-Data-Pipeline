@@ -51,6 +51,68 @@ Read this README and follow the step-by-step guide to set up the pipeline on you
 
 The architecture of the end-to-end data pipeline is designed to handle both batch and streaming data processing. Below is a high-level overview of the components and their interactions:
 
+### High-Level Architecture
+
+```mermaid
+graph TB
+    subgraph "Data Sources"
+        BS[Batch Sources<br/>MySQL, Files, CSV/JSON/XML]
+        SS[Streaming Sources<br/>Kafka Events, IoT, Social Media]
+    end
+
+    subgraph "Ingestion & Orchestration"
+        AIR[Apache Airflow<br/>DAG Orchestration]
+        KAF[Apache Kafka<br/>Event Streaming]
+    end
+
+    subgraph "Processing Layer"
+        SPB[Spark Batch<br/>Large-scale ETL]
+        SPS[Spark Streaming<br/>Real-time Processing]
+        GE[Great Expectations<br/>Data Quality]
+    end
+
+    subgraph "Storage Layer"
+        MIN[MinIO<br/>S3-Compatible Storage]
+        PG[PostgreSQL<br/>Analytics Database]
+        S3[AWS S3<br/>Cloud Storage]
+        MDB[MongoDB<br/>NoSQL Store]
+        IDB[InfluxDB<br/>Time-series DB]
+    end
+
+    subgraph "Monitoring & Governance"
+        PROM[Prometheus<br/>Metrics Collection]
+        GRAF[Grafana<br/>Dashboards]
+        ATL[Apache Atlas<br/>Data Lineage]
+    end
+
+    subgraph "ML & Serving"
+        MLF[MLflow<br/>Model Tracking]
+        FST[Feast<br/>Feature Store]
+        BI[BI Tools<br/>Tableau/PowerBI/Looker]
+    end
+
+    BS --> AIR
+    SS --> KAF
+    AIR --> SPB
+    KAF --> SPS
+    SPB --> GE
+    SPS --> GE
+    GE --> MIN
+    GE --> PG
+    MIN --> S3
+    PG --> MDB
+    PG --> IDB
+    SPB --> PROM
+    SPS --> PROM
+    PROM --> GRAF
+    SPB --> ATL
+    SPS --> ATL
+    PG --> MLF
+    PG --> FST
+    PG --> BI
+    MIN --> MLF
+```
+
 ### Flow Diagram
 
 <p align="center">
@@ -59,7 +121,112 @@ The architecture of the end-to-end data pipeline is designed to handle both batc
 
 Basically, data will be streamed with Kafka, processed with Spark, and stored in a data warehouse using PostgreSQL. The pipeline also integrates MinIO as an object storage solution and uses Airflow to orchestrate the end-to-end data flow. Great Expectations enforces data quality checks, while Prometheus and Grafana provide monitoring and alerting capabilities. MLflow and Feast are used for machine learning model tracking and feature store integration.
 
+> [!CAUTION]
 > Note: The diagram(s) may not reflect ALL components in the repository, but it provides a good overview of the main components and their interactions. For instance, I added BI tools like Tableau, Power BI, and Looker to the repo for data visualization and reporting.
+
+### Batch Pipeline Flow
+
+```mermaid
+sequenceDiagram
+    participant BS as Batch Source<br/>(MySQL/Files)
+    participant AF as Airflow DAG
+    participant GE as Great Expectations
+    participant MN as MinIO
+    participant SP as Spark Batch
+    participant PG as PostgreSQL
+    participant MG as MongoDB
+    participant PR as Prometheus
+
+    BS->>AF: Trigger Batch Job
+    AF->>BS: Extract Data
+    AF->>GE: Validate Data Quality
+    GE-->>AF: Validation Results
+    AF->>MN: Upload Raw Data
+    AF->>SP: Submit Spark Job
+    SP->>MN: Read Raw Data
+    SP->>SP: Transform & Enrich
+    SP->>PG: Write Processed Data
+    SP->>MG: Write NoSQL Data
+    SP->>PR: Send Metrics
+    AF->>PR: Job Status Metrics
+```
+
+### Streaming Pipeline Flow
+
+```mermaid
+sequenceDiagram
+    participant KP as Kafka Producer
+    participant KT as Kafka Topic
+    participant SS as Spark Streaming
+    participant AD as Anomaly Detection
+    participant PG as PostgreSQL
+    participant MN as MinIO
+    participant GF as Grafana
+
+    KP->>KT: Publish Events
+    KT->>SS: Consume Stream
+    SS->>AD: Process Events
+    AD->>AD: Detect Anomalies
+    AD->>PG: Store Results
+    AD->>MN: Archive Data
+    SS->>GF: Real-time Metrics
+    GF->>GF: Update Dashboard
+```
+
+### Data Quality & Governance Flow
+
+```mermaid
+graph LR
+    subgraph "Data Quality Pipeline"
+        DI[Data Ingestion] --> GE[Great Expectations]
+        GE --> VR{Validation<br/>Result}
+        VR -->|Pass| DP[Data Processing]
+        VR -->|Fail| AL[Alert & Log]
+        AL --> DR[Data Rejection]
+        DP --> DQ[Quality Metrics]
+    end
+
+    subgraph "Data Governance"
+        DP --> ATL[Apache Atlas]
+        ATL --> LIN[Lineage Tracking]
+        ATL --> CAT[Data Catalog]
+        ATL --> POL[Policies & Compliance]
+    end
+
+    DQ --> PROM[Prometheus]
+    PROM --> GRAF[Grafana Dashboard]
+```
+
+### CI/CD & Deployment Pipeline
+
+```mermaid
+graph LR
+    subgraph "Development"
+        DEV[Developer] --> GIT[Git Push]
+    end
+
+    subgraph "CI/CD Pipeline"
+        GIT --> GHA[GitHub Actions]
+        GHA --> TEST[Run Tests]
+        TEST --> BUILD[Build Docker Images]
+        BUILD --> SCAN[Security Scan]
+        SCAN --> PUSH[Push to Registry]
+    end
+
+    subgraph "Deployment"
+        PUSH --> ARGO[Argo CD]
+        ARGO --> K8S[Kubernetes Cluster]
+        K8S --> HELM[Helm Charts]
+        HELM --> PODS[Deploy Pods]
+    end
+
+    subgraph "Infrastructure"
+        TERRA[Terraform] --> CLOUD[Cloud Resources]
+        CLOUD --> K8S
+    end
+
+    PODS --> MON[Monitoring]
+```
 
 ### Text-Based Pipeline Diagram
 
@@ -116,6 +283,75 @@ Although the frontend & backend integration is not included in this repository (
 <p align="center">
   <img src="assets/full_flow_diagram.png" alt="Full Flow Diagram" width="100%"/>
 </p>
+
+### Docker Services Architecture
+
+```mermaid
+graph TB
+    subgraph "Docker Compose Stack"
+        subgraph "Data Sources"
+            MYSQL[MySQL<br/>Port: 3306]
+            KAFKA[Kafka<br/>Port: 9092]
+            ZK[Zookeeper<br/>Port: 2181]
+        end
+
+        subgraph "Processing"
+            AIR[Airflow<br/>Webserver:8080<br/>Scheduler]
+            SPARK[Spark<br/>Master/Worker]
+        end
+
+        subgraph "Storage"
+            MINIO[MinIO<br/>API: 9000<br/>Console: 9001]
+            PG[PostgreSQL<br/>Port: 5432]
+        end
+
+        subgraph "Monitoring"
+            PROM[Prometheus<br/>Port: 9090]
+            GRAF[Grafana<br/>Port: 3000]
+        end
+
+        KAFKA --> ZK
+        AIR --> MYSQL
+        AIR --> PG
+        AIR --> SPARK
+        SPARK --> MINIO
+        SPARK --> PG
+        SPARK --> KAFKA
+        PROM --> AIR
+        PROM --> SPARK
+        GRAF --> PROM
+    end
+```
+
+### ML Pipeline Flow
+
+```mermaid
+flowchart LR
+    subgraph "Feature Engineering"
+        RAW[Raw Data] --> FE[Feature<br/>Extraction]
+        FE --> FS[Feature Store<br/>Feast]
+    end
+
+    subgraph "Model Training"
+        FS --> TRAIN[Training<br/>Pipeline]
+        TRAIN --> VAL[Validation]
+        VAL --> MLF[MLflow<br/>Registry]
+    end
+
+    subgraph "Model Serving"
+        MLF --> DEPLOY[Model<br/>Deployment]
+        DEPLOY --> API[Prediction<br/>API]
+        API --> APP[Applications]
+    end
+
+    subgraph "Monitoring"
+        API --> METRICS[Performance<br/>Metrics]
+        METRICS --> DRIFT[Drift<br/>Detection]
+        DRIFT --> RETRAIN[Retrigger<br/>Training]
+    end
+
+    RETRAIN --> TRAIN
+```
 
 ## Directory Structure
 
@@ -272,6 +508,7 @@ end-to-end-pipeline/
 
 Congratulations! You have successfully set up the end-to-end data pipeline with batch and streaming processing. However, this is a very general pipeline that needs to be customized for your specific use case.
 
+> [!IMPORTANT]
 > Note: Be sure to visit the files and scripts in the repository and change the credentials, configurations, and logic to match your environment and use case. Feel free to extend the pipeline with additional components, services, or integrations as needed.
 
 ## Configuration & Customization
@@ -303,34 +540,84 @@ Congratulations! You have successfully set up the end-to-end data pipeline with 
 
 ## Example Applications
 
+```mermaid
+mindmap
+  root((Data Pipeline<br/>Use Cases))
+    E-Commerce
+      Real-Time Recommendations
+        Clickstream Processing
+        User Behavior Analysis
+        Personalized Content
+      Fraud Detection
+        Transaction Monitoring
+        Pattern Recognition
+        Risk Scoring
+    Finance
+      Risk Analysis
+        Credit Assessment
+        Portfolio Analytics
+        Market Risk
+      Trade Surveillance
+        Market Data Processing
+        Compliance Monitoring
+        Anomaly Detection
+    Healthcare
+      Patient Monitoring
+        IoT Sensor Data
+        Real-time Alerts
+        Predictive Analytics
+      Clinical Trials
+        Data Integration
+        Outcome Prediction
+        Drug Efficacy Analysis
+    IoT/Manufacturing
+      Predictive Maintenance
+        Sensor Analytics
+        Failure Prediction
+        Maintenance Scheduling
+      Supply Chain
+        Inventory Optimization
+        Logistics Tracking
+        Demand Forecasting
+    Media
+      Sentiment Analysis
+        Social Media Streams
+        Brand Monitoring
+        Trend Detection
+      Ad Fraud Detection
+        Click Pattern Analysis
+        Bot Detection
+        Campaign Analytics
+```
+
 ### E-Commerce & Retail
-- **Real-Time Recommendations:**  
+- **Real-Time Recommendations:**
   Process clickstream data to generate personalized product recommendations.
-- **Fraud Detection:**  
+- **Fraud Detection:**
   Detect unusual purchasing patterns or multiple high-value transactions in real-time.
 
 ### Financial Services & Banking
-- **Risk Analysis:**  
+- **Risk Analysis:**
   Aggregate transaction data to assess customer credit risk.
-- **Trade Surveillance:**  
+- **Trade Surveillance:**
   Monitor market data and employee trades for insider trading signals.
 
 ### Healthcare & Life Sciences
-- **Patient Monitoring:**  
+- **Patient Monitoring:**
   Process sensor data from medical devices to alert healthcare providers of critical conditions.
-- **Clinical Trial Analysis:**  
+- **Clinical Trial Analysis:**
   Analyze historical trial data for predictive analytics in treatment outcomes.
 
 ### IoT & Manufacturing
-- **Predictive Maintenance:**  
+- **Predictive Maintenance:**
   Monitor sensor data from machinery to predict failures before they occur.
-- **Supply Chain Optimization:**  
+- **Supply Chain Optimization:**
   Aggregate data across manufacturing processes to optimize production and logistics.
 
 ### Media & Social Networks
-- **Sentiment Analysis:**  
+- **Sentiment Analysis:**
   Analyze social media feeds in real-time to gauge public sentiment on new releases.
-- **Ad Fraud Detection:**  
+- **Ad Fraud Detection:**
   Identify and block fraudulent clicks on digital advertisements.
 
 Feel free to use this pipeline as a starting point for your data processing needs. Extend it with additional components, services, or integrations to build a robust, end-to-end data platform.
@@ -363,7 +650,8 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
 
 ## Final Notes
 
-This end-to-end data pipeline is designed for rapid deployment and customization. With minor configuration changes, it can be adapted to many business cases—from real-time analytics and fraud detection to predictive maintenance and advanced ML model training. Enjoy building a data-driven future with this pipeline!
+> [!NOTE]
+> This end-to-end data pipeline is designed for rapid deployment and customization. With minor configuration changes, it can be adapted to many business cases—from real-time analytics and fraud detection to predictive maintenance and advanced ML model training. Enjoy building a data-driven future with this pipeline!
 
 ---
 
